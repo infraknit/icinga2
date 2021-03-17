@@ -42,7 +42,7 @@ using Prio = RedisConnection::QueryPriority;
 
 static const char * const l_LuaResetDump = R"EOF(
 
-local id = redis.call('XADD', KEYS[1], '*', 'type', '*', 'state', 'wip')
+local id = redis.call('XADD', KEYS[1], '*', 'key', '*', 'state', 'wip')
 
 local xr = redis.call('XRANGE', KEYS[1], '-', '+')
 for i = 1, #xr - 1 do
@@ -485,7 +485,9 @@ void IcingaDB::UpdateAllConfigObjects()
 			flushSets();
 		}
 
-		m_Rcon->FireAndForgetQuery({"XADD", "icinga:dump", "*", "type", lcType, "state", "done"}, Prio::Config);
+		for (auto& key : GetTypeDumpSignalKeys(lcType)) {
+			m_Rcon->FireAndForgetQuery({"XADD", "icinga:dump", "*", "key", key, "state", "done"}, Prio::Config);
+		}
 	});
 
 	upq.Join();
@@ -503,7 +505,11 @@ void IcingaDB::UpdateAllConfigObjects()
 		}
 	}
 
-	m_Rcon->FireAndForgetQuery({"XADD", "icinga:dump", "*", "type", "*", "state", "done"}, Prio::Config);
+	for (auto& key : globalKeys) {
+		m_Rcon->FireAndForgetQuery({"XADD", "icinga:dump", "*", "key", key, "state", "done"}, Prio::Config);
+	}
+
+	m_Rcon->FireAndForgetQuery({"XADD", "icinga:dump", "*", "key", "*", "state", "done"}, Prio::Config);
 
 	// enqueue a callback that will notify us once all previous queries were executed and wait for this event
 	std::promise<void> p;
@@ -567,6 +573,36 @@ std::vector<String> IcingaDB::GetTypeOverwriteKeys(const String& type)
 		keys.emplace_back(m_PrefixConfigCheckSum + type + ":envvar");
 		keys.emplace_back(m_PrefixConfigObject + type + ":argument");
 		keys.emplace_back(m_PrefixConfigCheckSum + type + ":argument");
+	}
+
+	return std::move(keys);
+}
+
+std::vector<String> IcingaDB::GetTypeDumpSignalKeys(const String& type)
+{
+	std::vector<String> keys = {
+			m_PrefixConfigObject + type,
+			m_PrefixConfigObject + type + ":customvar",
+	};
+
+	if (type == "host" || type == "service") {
+		keys.emplace_back(m_PrefixConfigObject + type + ":groupmember");
+		keys.emplace_back(m_PrefixStateObject + type);
+	} else if (type == "user") {
+		keys.emplace_back(m_PrefixConfigObject + type + ":groupmember");
+	} else if (type == "timeperiod") {
+		keys.emplace_back(m_PrefixConfigObject + type + ":override:include");
+		keys.emplace_back(m_PrefixConfigObject + type + ":override:exclude");
+		keys.emplace_back(m_PrefixConfigObject + type + ":range");
+	} else if (type == "zone") {
+		keys.emplace_back(m_PrefixConfigObject + type + ":parent");
+	} else if (type == "notification") {
+		keys.emplace_back(m_PrefixConfigObject + type + ":user");
+		keys.emplace_back(m_PrefixConfigObject + type + ":usergroup");
+		keys.emplace_back(m_PrefixConfigObject + type + ":recipient");
+	} else if (type == "checkcommand" || type == "notificationcommand" || type == "eventcommand") {
+		keys.emplace_back(m_PrefixConfigObject + type + ":envvar");
+		keys.emplace_back(m_PrefixConfigObject + type + ":argument");
 	}
 
 	return std::move(keys);
