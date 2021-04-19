@@ -941,12 +941,31 @@ void IcingaDB::InsertObjectDependencies(const ConfigObject::Ptr& object, const S
 					values = new Dictionary({{"value", kv.second}});
 				}
 
-				{
+				for (const char *attr : {"value", "set_if"}) {
 					Value value;
 
-					// JsonEncode() the value if it's set.
-					if (values->Get("value", &value)) {
-						values->Set("value", JsonEncode(value));
+					// Stringify if set.
+					if (values->Get(attr, &value)) {
+						switch (value.GetType()) {
+							case ValueString:
+								break;
+							case ValueObject:
+								{
+									auto obj (value.Get<Object::Ptr>().get());
+
+									// Keep this in sync with JsonEncode()'s internals!
+									if (!(dynamic_cast<Namespace*>(obj)
+										|| dynamic_cast<Dictionary*>(obj)
+										|| dynamic_cast<Array*>(obj))) {
+											values->Set(attr, obj->ToString());
+											break;
+									}
+								}
+
+								// fallthrough
+							default:
+								values->Set(attr, JsonEncode(value));
+						}
 					}
 				}
 
